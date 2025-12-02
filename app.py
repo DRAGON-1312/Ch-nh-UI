@@ -94,7 +94,6 @@ def _fmt_dist(meters):
 # Helpers for map
 def render_osm_map(center_lat, center_lng, items, height_px: int = 420, zoom_start: int = 14, pickable: bool = False):
     """Render OpenStreetMap (Leaflet/Folium) trong cột bản đồ của Streamlit."""
-
     def _is_num_local(x):
         try:
             float(x)
@@ -108,9 +107,8 @@ def render_osm_map(center_lat, center_lng, items, height_px: int = 420, zoom_sta
     else:
         center = None
         for p in items or []:
-            lat, lng = pick_lat_lng(p)          # 🔧 dùng helper
-            if _is_num_local(lat) and _is_num_local(lng):
-                center = [float(lat), float(lng)]
+            if _is_num_local(p.get("lat")) and _is_num_local(p.get("lng")):
+                center = [float(p["lat"]), float(p["lng"])]
                 break
         if center is None:
             center = [10.776889, 106.700806]  # fallback HCM
@@ -127,7 +125,7 @@ def render_osm_map(center_lat, center_lng, items, height_px: int = 420, zoom_sta
 
     # Marker các điểm (cam)
     for i, p in enumerate(items or [], 1):
-        lat, lng = pick_lat_lng(p)             # 🔧 dùng helper
+        lat, lng = p.get("lat"), p.get("lng")
         if not (_is_num_local(lat) and _is_num_local(lng)):
             continue
         name = p.get("name", "Unknown")
@@ -157,10 +155,13 @@ def render_osm_map(center_lat, center_lng, items, height_px: int = 420, zoom_sta
                 and abs(last.get("lat", 0.0) - lat) < 1e-6
                 and abs(last.get("lng", 0.0) - lng) < 1e-6
             ):
+                # cùng một click cũ → bỏ qua, KHÔNG rerun nữa
                 return
 
+            # lưu lại click hiện tại
             st.session_state.nf_last_map_click = {"lat": lat, "lng": lng}
 
+            # Reverse-geocode bằng BE để lấy display_address/ place_id
             display = f"{lat:.6f}, {lng:.6f}"
             place_id = None
             try:
@@ -169,8 +170,10 @@ def render_osm_map(center_lat, center_lng, items, height_px: int = 420, zoom_sta
                 display = ori.get("display_address") or display
                 place_id = ori.get("place_id")
             except Exception:
+                # fallback: giữ nguyên "lat,lng"
                 pass
 
+            # Cập nhật origin cho toàn app
             st.session_state.origin_selected = {
                 "lat": lat,
                 "lng": lng,
@@ -181,19 +184,22 @@ def render_osm_map(center_lat, center_lng, items, height_px: int = 420, zoom_sta
             st.session_state.origin_text = display
             st.session_state.prev_origin_text = display
 
+            # khóa autocomplete + đánh dấu đã confirm context
             st.session_state.origin_locked = True
             st.session_state.ctx_confirmed = True
             st.session_state.chat_origin_text = display
             st.session_state._nf_chat_origin_next = display
 
+            # route preview cũ (nếu có) cũng nên bỏ
             st.session_state.route_preview = None
 
+            # feedback nhỏ
             try:
                 st.toast("Origin selected on map!", icon="✅")
             except Exception:
                 st.success("Origin selected on map!")
 
-            st.rerun()
+            st.rerun() 
     
     
 def render_route_map(origin: dict, dest: dict, rp: dict, height_px: int = 420):
@@ -219,12 +225,12 @@ def render_route_map(origin: dict, dest: dict, rp: dict, height_px: int = 420):
     st_folium(m, height=height_px, width=None)
 
 
-# My location (IP-based)
+# --- My location (IP-based) ---------------------------------------------------
 def _get_my_location():
     """
-    Prioritize retrieving coordinates from Browser Geolocation (most accurate).
-    If it fails → fallback to IP service (network node or ISP)
-    Return: (lat, lng, accuracy_m, source); accuracy_m may be None if using IP.
+    Ưu tiên lấy toạ độ từ Browser Geolocation (chính xác nhất).
+    Nếu thất bại → fallback về dịch vụ IP (backend_client.ip_location()).
+    Trả về: (lat, lng, accuracy_m, source)  ; accuracy_m có thể None nếu là IP.
     """
     try:
         loc = get_geolocation(timeout=5000)  # ms
@@ -232,14 +238,16 @@ def _get_my_location():
             c = loc["coords"]
             lat = c.get("latitude")
             lng = c.get("longitude")
-            acc = c.get("accuracy")  
+            acc = c.get("accuracy")  # mét
             if lat is not None and lng is not None:
                 return float(lat), float(lng), float(acc or 0), "browser"
     except Exception:
         pass
-    # Fallback: IP-based 
+
+    # --- Fallback: IP-based ---
     try:
         ip = ip_location()  
+        # chuẩn hoá dữ liệu trả về
         lat = float(ip.get("lat") or ip.get("latitude"))
         lng = float(ip.get("lng") or ip.get("longitude"))
         return lat, lng, None, "ip"
@@ -267,11 +275,13 @@ def _nf_reset_chat_ctx():
 # === Firebase setup ===
 FIREBASE_API_KEY = st.secrets["firebase_login"]["apiKey"]
 
-if not firebase_admin._apps:
-    cred = credentials.Certificate(dict(st.secrets["firebase_admin"]))
-    firebase_admin.initialize_app(cred)
-db = firestore.client()
+# Temporarily comment out Firebase to test Streamlit
+# if not firebase_admin._apps:
+#     cred = credentials.Certificate(dict(st.secrets["firebase_admin"]))
+#     firebase_admin.initialize_app(cred)
+# db = firestore.client()
 
+db = None  # placeholder
 
 def firebase_sign_in(email, password):
     url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={FIREBASE_API_KEY}"
@@ -280,14 +290,16 @@ def firebase_sign_in(email, password):
 
 
 def load_history(user_email):
-    history_ref = db.collection("users").document(user_email).collection("history").order_by("timestamp")
-    history_docs = history_ref.stream()
-    history_list = []
-    for doc in history_docs:
-        data = doc.to_dict()
-        data["timestamp"] = data["timestamp"].strftime("%d-%m-%Y %H:%M:%S")
-        history_list.append(data)
-    return history_list
+    # Temporarily disabled
+    return []
+    # history_ref = db.collection("users").document(user_email).collection("history").order_by("timestamp")
+    # history_docs = history_ref.stream()
+    # history_list = []
+    # for doc in history_docs:
+    #     data = doc.to_dict()
+    #     data["timestamp"] = data["timestamp"].strftime("%d-%m-%Y %H:%M:%S")
+    #     history_list.append(data)
+    # return history_list
 
 
 # ======= Session state =======
@@ -413,14 +425,28 @@ st.markdown(f"""
 <style>
 .nf-nav {{
   display:flex; justify-content:space-between; align-items:center;
-  background:#2F4F3A; padding:16px 24px; border-radius:12px;
+  background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
+  padding:20px 32px; border-radius:16px;
+  box-shadow: 0 4px 20px rgba(47, 79, 58, 0.2);
+  margin-bottom: 24px;
 }}
 .nf-nav .brand {{
-  display:flex; align-items:center; gap:12px;
-  color:#fff; font-weight:800; font-size:28px;
+  display:flex; align-items:center; gap:14px;
+  color:#fff; font-weight:700; font-size:30px;
+  letter-spacing: 0.5px;
+}}
+.nf-nav .auth {{
+  display: flex; gap: 8px;
 }}
 .nf-nav .auth a {{
-  color:#fff; text-decoration:none; font-size:16px; margin-left:20px;
+  color:#fff; text-decoration:none; font-size:16px; 
+  padding: 10px 20px; border-radius: 8px;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}}
+.nf-nav .auth a:hover {{
+  background: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
 }}
 </style>
 """, unsafe_allow_html=True)
@@ -432,14 +458,24 @@ if st.session_state.show_login:
         MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
+        .login-container {
+            max-width: 450px;
+            margin: 40px auto;
+            padding: 40px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+        }
         </style>
         """, unsafe_allow_html=True)
 
-    st.subheader("Login")
-    login_email = st.text_input("Email", key="login_email")
-    login_pass = st.text_input("Password", type="password", key="login_pass")
+    st.markdown('<div class="login-container">', unsafe_allow_html=True)
+    st.markdown("### 🔐 Login")
+    st.markdown("---")
+    login_email = st.text_input("Email", key="login_email", placeholder="Enter your email")
+    login_pass = st.text_input("Password", type="password", key="login_pass", placeholder="Enter your password")
 
-    if st.button("Login"):
+    if st.button("Login", type="primary", use_container_width=True):
         result = firebase_sign_in(login_email, login_pass)
 
         if "error" in result:
@@ -455,7 +491,8 @@ if st.session_state.show_login:
             st.success(f"Login successful: {login_email}")
             st.query_params.update({"page": "home"})
             st.rerun()
-
+    
+    st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 # --- REGISTER FORM ---
@@ -465,15 +502,25 @@ if st.session_state.show_register:
         MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
+        .register-container {
+            max-width: 450px;
+            margin: 40px auto;
+            padding: 40px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+        }
         </style>
     """, unsafe_allow_html=True)
 
-    st.subheader("Register")
-    reg_email = st.text_input("Email", key="reg_email")
-    reg_pass = st.text_input("Password", type="password", key="reg_pass")
-    reg_cf = st.text_input("Confirm Password", type="password", key="reg_cf")
+    st.markdown('<div class="register-container">', unsafe_allow_html=True)
+    st.markdown("### ✨ Create Account")
+    st.markdown("---")
+    reg_email = st.text_input("Email", key="reg_email", placeholder="Enter your email")
+    reg_pass = st.text_input("Password", type="password", key="reg_pass", placeholder="Create a password")
+    reg_cf = st.text_input("Confirm Password", type="password", key="reg_cf", placeholder="Confirm your password")
 
-    if st.button("Create Account"):
+    if st.button("Create Account", type="primary", use_container_width=True):
         if reg_pass != reg_cf:
             st.error("Passwords do not match!")
         else:
@@ -491,7 +538,8 @@ if st.session_state.show_register:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Registration error: {e}")
-
+    
+    st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 # --- HOME PAGE ---
@@ -509,7 +557,7 @@ if page == "home":
 # =========================
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
 * {
     font-family: 'Poppins', sans-serif;
@@ -518,12 +566,20 @@ st.markdown("""
 MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
+
+/* Global improvements */
+.stApp {
+    background: linear-gradient(180deg, #f8faf9 0%, #ffffff 100%);
+}
+
 .header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 18px 40px;
-    background-color: #2F4F3B;
+    background: linear-gradient(135deg, #2F4F3B 0%, #3A5F45 100%);
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(47, 79, 58, 0.15);
 }
 
 .header-title {
@@ -536,35 +592,262 @@ header {visibility: hidden;}
 }
 
 .recommender-btn {
-    background-color: #506654;
-    color: green;
-    padding: 10px 28px;
-    border-radius: 6px;
+    background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
+    color: white;
+    padding: 12px 32px;
+    border-radius: 10px;
     font-size: 18px;
+    font-weight: 600;
     text-decoration: none;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(47, 79, 58, 0.3);
+}
+
+.recommender-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(47, 79, 58, 0.5);
+    background: linear-gradient(135deg, #3A5F45 0%, #436757 100%);
 }
 
 .input-box {
     background: white;
-    padding: 25px;
-    border-radius: 40px;
+    padding: 28px;
+    border-radius: 16px;
     margin-top: 25px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e8ecea;
 }
 
 .input-title {
     font-size: 16px;
     font-weight: 600;
-    color: #333;
-    margin-bottom: 6px;
+    color: #2F4F3A;
+    margin-bottom: 8px;
 }
 
 .chat-item {
     background: white;
-    padding: 8px 12px;
+    padding: 12px 16px;
     margin-top: 8px;
-    border-radius: 14px;
-    border: 1px solid #ccc;
+    border-radius: 12px;
+    border: 1px solid #e0e6e3;
     cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.chat-item:hover {
+    background: #f5f7f6;
+    border-color: #2F4F3A;
+    transform: translateX(4px);
+}
+
+/* Input fields styling */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stSelectbox > div > div > select {
+    border-radius: 10px;
+    border: 2px solid #e0e6e3;
+    transition: all 0.3s ease;
+}
+
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus {
+    border-color: #2F4F3A;
+    box-shadow: 0 0 0 3px rgba(47, 79, 58, 0.15);
+}
+
+/* Buttons styling */
+.stButton > button {
+    border-radius: 10px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    border: none;
+    background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
+    color: white;
+}
+
+.stButton > button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(47, 79, 58, 0.4);
+    background: linear-gradient(135deg, #3A5F45 0%, #436757 100%);
+}
+
+/* Primary button */
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(47, 79, 58, 0.3);
+}
+
+.stButton > button[kind="primary"]:hover {
+    box-shadow: 0 6px 16px rgba(47, 79, 58, 0.5);
+    background: linear-gradient(135deg, #3A5F45 0%, #436757 100%);
+}
+
+/* Cards and containers */
+[data-testid="stVerticalBlock"] {
+    gap: 1rem;
+}
+
+/* Map container */
+.stMap {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* Results list */
+[data-testid="stMarkdownContainer"] {
+    padding: 8px 0;
+}
+
+/* Selectbox styling */
+.stSelectbox > div > div > select {
+    border-radius: 10px;
+    border: 2px solid #e0e6e3;
+    padding: 8px 12px;
+    transition: all 0.3s ease;
+    background-color: white;
+}
+
+.stSelectbox > div > div > select:focus {
+    border-color: #2F4F3A;
+    box-shadow: 0 0 0 3px rgba(47, 79, 58, 0.15);
+}
+
+/* Number input styling */
+.stNumberInput > div > div > input {
+    border-radius: 10px;
+    border: 2px solid #e0e6e3;
+    transition: all 0.3s ease;
+}
+
+.stNumberInput > div > div > input:focus {
+    border-color: #2F4F3A;
+    box-shadow: 0 0 0 3px rgba(47, 79, 58, 0.15);
+}
+
+/* Toggle styling */
+.stToggle > label {
+    font-weight: 500;
+    color: #2F4F3A;
+}
+
+/* Radio button styling */
+.stRadio > div {
+    background: #f8faf9;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid #e0e6e3;
+}
+
+/* Subheader styling */
+h3 {
+    color: #2F4F3A;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+/* Success/Error messages */
+.stSuccess {
+    background: #d4edda;
+    border-left: 4px solid #28a745;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+.stError {
+    background: #f8d7da;
+    border-left: 4px solid #dc3545;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+.stWarning {
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+.stInfo {
+    background: #d1ecf1;
+    border-left: 4px solid #17a2b8;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+/* Slider styling */
+.stSlider > div > div > div {
+    background: linear-gradient(90deg, #2F4F3A 0%, #3A5F45 100%);
+}
+
+/* Spinner styling */
+.stSpinner > div {
+    border-color: #2F4F3A transparent transparent transparent;
+}
+
+/* Results scrollable container */
+.results-scroll-container {
+    max-height: 600px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px 4px;
+    margin-top: 12px;
+}
+
+/* Custom scrollbar cho results container */
+.results-scroll-container::-webkit-scrollbar {
+    width: 10px;
+}
+
+.results-scroll-container::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+    margin: 8px 0;
+}
+
+.results-scroll-container::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
+    border-radius: 10px;
+    border: 2px solid #f1f1f1;
+}
+
+.results-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, #3A5F45 0%, #436757 100%);
+}
+
+/* Result card styling */
+.result-card {
+    background: linear-gradient(135deg, #ffffff 0%, #f8faf9 100%);
+    padding: 16px 18px;
+    border-radius: 14px;
+    margin: 10px 0;
+    border-left: 4px solid #2F4F3A;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.result-card:hover {
+    box-shadow: 0 4px 16px rgba(47, 79, 58, 0.15);
+    transform: translateX(4px);
+    border-left-color: #3A5F45;
+}
+
+.result-number {
+    background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
+    color: white;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 13px;
+    box-shadow: 0 2px 6px rgba(47, 79, 58, 0.25);
+    flex-shrink: 0;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -797,21 +1080,23 @@ with c_map:
     # Lấy dữ liệu cho map: items (nếu đã có kết quả) + origin hiện có
     items_for_map = (res or {}).get("items") or []
 
+    # ⚠️ ƯU TIÊN origin_selected (từ map / suggest / My location)
+    # rồi mới tới origin trong kết quả search cũ
     origin_for_map = (
         st.session_state.get("origin_selected")
         or (res or {}).get("origin")
         or {}
     )
 
-    # Toạ độ trung tâm: ưu tiên origin, fallback sang item đầu tiên (dùng pick_lat_lng)
+    # Toạ độ trung tâm: ưu tiên origin, fallback sang item đầu tiên (nếu có)
     center_lat = center_lng = None
     if isinstance(origin_for_map, dict):
-        center_lat, center_lng = pick_lat_lng(origin_for_map)
-
+        center_lat = origin_for_map.get("lat")
+        center_lng = origin_for_map.get("lng")
     if not (_is_num(center_lat) and _is_num(center_lng)):
         if items_for_map:
-            center_lat, center_lng = pick_lat_lng(items_for_map[0])
-
+            center_lat = items_for_map[0].get("lat")
+            center_lng = items_for_map[0].get("lng")
 
     # Nếu đang ở chế độ xem route_preview và có đủ dữ liệu → vẽ route,
     # ngược lại luôn vẽ map điểm (origin + items)
@@ -1250,7 +1535,7 @@ if res and not st.session_state.pending_cands:
                 st.session_state.route_preview = None
                 st.rerun()  
 
-            # Chọn 1 item để preview route
+            # Chọn 1 item để preview route (dựa trên toàn bộ danh sách kết quả)
             name_opts = [f"{i+1}. {p.get('name','Unknown')}" for i, p in enumerate(items)]
             sel_idx = st.selectbox(
                 "Preview route to:",
@@ -1280,35 +1565,62 @@ if res and not st.session_state.pending_cands:
                         st.error("Failed to fetch route from backend.")
                         st.exception(e)
 
-            # Render danh sách kèm ETA/Distance
-            for i, p in enumerate(items, 1):
-                name    = p.get("name", "Unknown")
-                addr    = p.get("display_address", "")
-                rating  = p.get("rating")
-                reviews = p.get("user_ratings_total")
+            # # Container scrollable cho danh sách
+            # st.markdown("""
+            # <div class="results-scroll-container">
+            # """, unsafe_allow_html=True)
+            with st.container(border=True, height=300):
+                # Render danh sách kèm ETA/Distance với card đẹp
+                for i, p in enumerate(items, 1):
+                    name    = p.get("name", "Unknown")
+                    addr    = p.get("display_address", "")
+                    rating  = p.get("rating")
+                    reviews = p.get("user_ratings_total")
 
-                sig      = p.get("signals") or {}
-                raw_eta  = p.get("eta_s") or p.get("duration_s") or sig.get("duration_s")
-                raw_dist = p.get("distance_m") or sig.get("distance_m")
+                    sig      = p.get("signals") or {}
+                    raw_eta  = p.get("eta_s") or p.get("duration_s") or sig.get("duration_s")
+                    raw_dist = p.get("distance_m") or sig.get("distance_m")
 
-                eta_txt  = _fmt_eta(raw_eta)
-                dist_txt = _fmt_dist(raw_dist)
+                    eta_txt  = _fmt_eta(raw_eta)
+                    dist_txt = _fmt_dist(raw_dist)
 
-                meta = []
-                if rating is not None:
-                    meta.append(f"⭐ {rating}")
-                    if reviews is not None:
-                        meta.append(f"({reviews})")
-                if eta_txt:
-                    meta.append(f"🕒 {eta_txt}")
-                if dist_txt:
-                    meta.append(f"📏 {dist_txt}")
-
-                st.markdown(
-                    f"**{i}. {name}**  \n"
-                    f"{addr}  \n"
-                    f"{'  '.join(meta)}"
-                )
+                    # Tạo card HTML đẹp
+                    rating_html = ""
+                    if rating is not None:
+                        stars = "⭐" * min(5, int(rating))
+                        rating_html = f'<div style="display: flex; align-items: center; gap: 6px; margin: 6px 0;"><span style="font-size: 14px;">{stars}</span><span style="font-weight: 600; color: #2F4F3A; font-size: 14px;">{rating:.1f}</span>'
+                        if reviews is not None:
+                            rating_html += f'<span style="color: #6c757d; font-size: 12px; margin-left: 4px;">({reviews})</span>'
+                        rating_html += "</div>"
+                    
+                    meta_html = '<div style="display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap;">'
+                    if eta_txt:
+                        meta_html += f'<span style="background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); padding: 4px 10px; border-radius: 16px; font-size: 12px; font-weight: 600; color: #2F4F3A;">🕒 {eta_txt}</span>'
+                    if dist_txt:
+                        meta_html += f'<span style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 4px 10px; border-radius: 16px; font-size: 12px; font-weight: 600; color: #1976d2;">📏 {dist_txt}</span>'
+                    meta_html += "</div>"
+                    
+                    # Giới hạn độ dài địa chỉ để không quá dài
+                    addr_display = addr
+                    if len(addr) > 80:
+                        addr_display = addr[:77] + "..."
+                    
+                    card_html = f"""
+                    <div class="result-card">
+                        <div style="display: flex; align-items: flex-start; gap: 12px;">
+                            <span class="result-number">{i}</span>
+                            <div style="flex: 1; min-width: 0;">
+                                <h4 style="margin: 0 0 6px 0; color: #2F4F3A; font-weight: 700; font-size: 16px; line-height: 1.3;">{name}</h4>
+                                <p style="color: #6c757d; margin: 0 0 8px 0; font-size: 13px; line-height: 1.4; word-wrap: break-word;">{addr_display}</p>
+                                {rating_html}
+                                {meta_html}
+                            </div>
+                        </div>
+                    </div>
+                    """
+                    st.markdown(card_html, unsafe_allow_html=True)
+                
+                st.markdown("</div>", unsafe_allow_html=True)
 
 
 # =========================
@@ -1898,27 +2210,132 @@ st.markdown("""
 <style>
 /* FAB (nút tròn) – đặt cố định góc phải dưới */
 section.main .block-container div:has(> .element-container .nf-fab-hook) button {
-  position: fixed; right: 22px; bottom: 22px; z-index: 9999;
-  width: 56px; height: 56px; border-radius: 50%;
-  background:#2F4F3A; color:#fff; font-size:22px; font-weight:700;
-  box-shadow:0 8px 24px rgba(0,0,0,.18); border: none;
+  position: fixed; right: 24px; bottom: 24px; z-index: 9999;
+  width: 60px; height: 60px; border-radius: 50%;
+  background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
+  color:#fff; font-size:24px; font-weight:700;
+  box-shadow: 0 8px 24px rgba(47, 79, 58, 0.4);
+  border: none;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+section.main .block-container div:has(> .element-container .nf-fab-hook) button:hover {
+  transform: scale(1.1) translateY(-2px);
+  box-shadow: 0 12px 32px rgba(47, 79, 58, 0.6);
+  background: linear-gradient(135deg, #3A5F45 0%, #436757 100%);
 }
 
 /* Drawer nổi – cố định phía trên FAB */
 section.main .block-container div:has(> .element-container .nf-drawer-hook) {
-  position: fixed; right: 22px; bottom: 86px; z-index: 9998;
-  width: 380px; max-height: 70vh; overflow: auto;
-  background: #fff; border: 1px solid #e5e5e5; border-radius: 14px;
-  box-shadow:0 10px 28px rgba(0,0,0,.15); padding: 10px 12px;
+  position: fixed; right: 24px; bottom: 100px; z-index: 9998;
+  width: 400px; max-height: 75vh; overflow: auto;
+  background: #fff; 
+  border: 1px solid #e0e6e3; 
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.2);
+  padding: 16px 18px;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Scrollbar cho drawer */
+section.main .block-container div:has(> .element-container .nf-drawer-hook)::-webkit-scrollbar {
+  width: 8px;
+}
+
+section.main .block-container div:has(> .element-container .nf-drawer-hook)::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+section.main .block-container div:has(> .element-container .nf-drawer-hook)::-webkit-scrollbar-thumb {
+  background: #2F4F3A;
+  border-radius: 10px;
+}
+
+section.main .block-container div:has(> .element-container .nf-drawer-hook)::-webkit-scrollbar-thumb:hover {
+  background: #3A5F45;
 }
 
 /* trang trí nhỏ */
-.nf-chip-row { display:flex; flex-wrap:wrap; gap:10px; margin:8px 4px; }
-section.main .block-container div:has(> .element-container .nf-drawer-hook) .stTextInput > div > div > input{
-  border-radius: 12px; padding: 10px 12px; border: 1px solid #ddd;
+.nf-chip-row { 
+  display:flex; 
+  flex-wrap:wrap; 
+  gap:10px; 
+  margin:12px 4px; 
 }
-section.main .block-container div:has(> .element-container .nf-drawer-hook) .stForm .stButton > button{
-  height: 42px; width: 100%; border-radius: 12px; background: #2F4F3A; color: #fff;
+
+.nf-chip-row button {
+  background: linear-gradient(135deg, #f5f7f6 0%, #ffffff 100%);
+  border: 2px solid #e0e6e3;
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #2F4F3A;
+  transition: all 0.3s ease;
+}
+
+.nf-chip-row button:hover {
+  background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
+  color: white;
+  border-color: #2F4F3A;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(47, 79, 58, 0.3);
+}
+
+section.main .block-container div:has(> .element-container .nf-drawer-hook) .stTextInput > div > div > input {
+  border-radius: 12px; 
+  padding: 12px 16px; 
+  border: 2px solid #e0e6e3;
+  transition: all 0.3s ease;
+}
+
+section.main .block-container div:has(> .element-container .nf-drawer-hook) .stTextInput > div > div > input:focus {
+  border-color: #2F4F3A;
+  box-shadow: 0 0 0 3px rgba(47, 79, 58, 0.15);
+}
+
+section.main .block-container div:has(> .element-container .nf-drawer-hook) .stForm .stButton > button {
+  height: 44px; 
+  width: 100%; 
+  border-radius: 12px; 
+  background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
+  color: #fff;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(47, 79, 58, 0.3);
+}
+
+section.main .block-container div:has(> .element-container .nf-drawer-hook) .stForm .stButton > button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(47, 79, 58, 0.5);
+  background: linear-gradient(135deg, #3A5F45 0%, #436757 100%);
+}
+
+/* Chat message styling */
+section.main .block-container div:has(> .element-container .nf-drawer-hook) [data-testid="stChatMessage"] {
+  padding: 12px;
+  border-radius: 12px;
+  margin: 8px 0;
+}
+
+section.main .block-container div:has(> .element-container .nf-drawer-hook) [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
+  background: #f5f7f6;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border-left: 4px solid #2F4F3A;
 }
 </style>
 """, unsafe_allow_html=True)
