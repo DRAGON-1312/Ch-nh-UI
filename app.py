@@ -107,9 +107,17 @@ def render_osm_map(center_lat, center_lng, items, height_px: int = 420, zoom_sta
     else:
         center = None
         for p in items or []:
-            if _is_num_local(p.get("lat")) and _is_num_local(p.get("lng")):
-                center = [float(p["lat"]), float(p["lng"])]
+            # hỗ trợ cả dạng {lat,lng} và {location:{lat,lng}}
+            lat = p.get("lat")
+            lng = p.get("lng")
+            if not (_is_num_local(lat) and _is_num_local(lng)):
+                loc = p.get("location") or {}
+                lat = loc.get("lat")
+                lng = loc.get("lng")
+            if _is_num_local(lat) and _is_num_local(lng):
+                center = [float(lat), float(lng)]
                 break
+
         if center is None:
             center = [10.776889, 106.700806]  # fallback HCM
 
@@ -125,9 +133,17 @@ def render_osm_map(center_lat, center_lng, items, height_px: int = 420, zoom_sta
 
     # Marker các điểm (cam)
     for i, p in enumerate(items or [], 1):
-        lat, lng = p.get("lat"), p.get("lng")
+        # hỗ trợ cả 2 dạng toạ độ
+        lat = p.get("lat")
+        lng = p.get("lng")
+        if not (_is_num_local(lat) and _is_num_local(lng)):
+            loc = p.get("location") or {}
+            lat = loc.get("lat")
+            lng = loc.get("lng")
+
         if not (_is_num_local(lat) and _is_num_local(lng)):
             continue
+
         name = p.get("name", "Unknown")
         addr = p.get("display_address", "")
         hint = p.get("hint") or ""
