@@ -319,8 +319,6 @@ def firebase_sign_in(email, password):
     return requests.post(url, json=payload).json()
 
 
-from datetime import datetime
-
 def load_history(user_email):
     history_ref = (
         db.collection("users")
@@ -329,6 +327,7 @@ def load_history(user_email):
           .order_by("timestamp")
           .limit(200)
     )
+
     docs = list(history_ref.stream())
     if not docs:
         return []
@@ -336,17 +335,15 @@ def load_history(user_email):
     msgs_raw = []
     for doc in docs:
         data = doc.to_dict()
-        ts_raw = data.get("timestamp")
+        ts = data.get("timestamp")
 
-        dt = None
-        if ts_raw is not None:
-            try:
-                if hasattr(ts_raw, "to_datetime"):
-                    dt = ts_raw.to_datetime().astimezone()
-                elif isinstance(ts_raw, datetime):
-                    dt = ts_raw.astimezone()
-            except Exception:
-                dt = None
+        # convert Firestore timestamp → datetime
+        if hasattr(ts, "to_datetime"):
+            dt = ts.to_datetime().astimezone()
+        elif isinstance(ts, datetime):
+            dt = ts.astimezone()
+        else:
+            continue   # skip item lỗi timestamp
 
         msgs_raw.append({
             "role": data.get("role", "assistant"),
@@ -354,26 +351,22 @@ def load_history(user_email):
             "dt": dt,
         })
 
-    dates = [
-        m["dt"].date()
+    # Lấy danh sách ngày duy nhất
+    all_dates = sorted({m["dt"].date() for m in msgs_raw})
+
+    #  Lấy 5 ngày gần nhất bằng index [-5:]
+    recent_dates = set(all_dates[-5:])
+
+    #  Lọc message thuộc 5 ngày này
+    msgs = [
+        {
+            "role": m["role"],
+            "content": m["content"],
+            "date": m["dt"].strftime("%d-%m-%Y")
+        }
         for m in msgs_raw
-        if isinstance(m.get("dt"), datetime)
+        if m["dt"].date() in recent_dates
     ]
-    if not dates:
-        return [{"role": m["role"], "content": m["content"], "date": ""} for m in msgs_raw]
-
-    unique_dates = sorted(set(dates))
-    selected_dates = set(unique_dates[-2:])   # 🔥 2 ngày gần nhất
-
-    msgs = []
-    for m in msgs_raw:
-        dt = m.get("dt")
-        if isinstance(dt, datetime) and dt.date() in selected_dates:
-            msgs.append({
-                "role": m["role"],
-                "content": m["content"],
-                "date": dt.strftime("%d-%m-%Y"),   # hoặc "%d-%m-%Y" nếu thích
-            })
 
     return msgs
 
@@ -567,7 +560,7 @@ st.markdown(f"""
 }}
 
 .stApp > div:first-child {{
-    background-color: rgba(255, 255, 255, 0.25);
+    background-color: rgba(255, 255, 255, 0.35);
     backdrop-filter: blur(2px);
 }}
 
@@ -583,8 +576,6 @@ iframe {{
 </style>
 """, unsafe_allow_html=True)
 
-
-
 # --- LOGIN FORM ---
 if st.session_state.show_login:
     st.markdown("""
@@ -592,15 +583,30 @@ if st.session_state.show_login:
         MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
+
         .login-container {
             max-width: 450px;
-            margin: 5px auto;        
-            padding: 15px;             
+            margin: 5px auto;
+            padding: 15px;
             background: transparent;
             border-radius: 16px;
             box-shadow: none;
         }
-        </style>
+
+        .stTextInput label {
+            font-weight: 900 !important;     
+            font-size: 48px !important;
+            color: #000000 !important;
+            letter-spacing: 1px !important;
+
+            text-shadow: 
+                0.4px 0   #000,
+                -0.4px 0  #000,
+                0  0.4px  #000,
+                0 -0.4px  #000;
+        }
+        
+      
         """, unsafe_allow_html=True)
 
     st.markdown('<div class="login-container">', unsafe_allow_html=True)
@@ -639,10 +645,22 @@ if st.session_state.show_register:
         .register-container {
             max-width: 450px;
             margin: 5px auto;          
-            padding: 20px;       
+            padding: 15px;       
             background: transparent;
             border-radius: 16px;
             box-shadow: none;
+        }
+        .stTextInput label {
+            font-weight: 900 !important;     
+            font-size: 48px !important;
+            color: #000000 !important;
+            letter-spacing: 1px !important;
+
+            text-shadow: 
+                0.4px 0   #000,
+                -0.4px 0  #000,
+                0  0.4px  #000,
+                0 -0.4px  #000;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -1946,9 +1964,32 @@ if st.session_state.chat_open:
                     # tránh crash nếu Firestore lỗi
                     st.session_state.history = st.session_state.get("history", [])
         with c2:
-            if st.button("✕", key="nf_close_btn"):
-                st.session_state.chat_open = False
-                st.stop()
+            if st.session_state.user:
+                if st.button(" X Clear history", key="nf_clear_history"):
+
+                    # 1) Xoá lịch sử ở UI
+                    st.session_state.chat_msgs = []
+                    st.session_state.chat_last_chips = []
+                    st.session_state.history = []
+
+                    # 2) Xoá toàn bộ lịch sử trên Firestore
+                    try:
+                        user_email = st.session_state.user
+
+                        docs = db.collection("users") \
+                                .document(user_email) \
+                                .collection("history") \
+                                .stream()
+
+                        for d in docs:
+                            d.reference.delete()
+
+                    except Exception as e:
+                        st.warning(f"⚠️ Could not clear cloud history: {e}")
+
+                    # 3) Refresh UI sau khi xoá
+                    st.rerun()
+
         
         # ✅ Chỉ còn 1 nút Reset, dùng luôn key nf_reset_ctx
         with c3:
@@ -1980,8 +2021,9 @@ if st.session_state.chat_open:
         #            "__last_ctx_debug": st.session_state.get("__last_ctx_debug"),
         #        })
          # Hiển thị lịch sử gần nhất (tối đa 10 message) nếu có
+        # Hiển thị lịch sử 5 ngày gần nhất (do load_history đã lọc sẵn)
         if st.session_state.user and st.session_state.history:
-            with st.expander("🕒 Recent chat history", expanded=False):
+            with st.expander("🕒 Chat history (last 5 days)", expanded=False):
                 last_date = None
 
                 for msg in st.session_state.history:
@@ -1989,16 +2031,17 @@ if st.session_state.chat_open:
                     role = msg.get("role", "assistant")
                     content = msg.get("content", "")
 
-                    # Khi đổi ngày → in header ngày + 1 đường kẻ
+                    # Đổi ngày → in header + ngăn cách
                     if date_str != last_date:
                         if last_date is not None:
                             st.markdown("<hr style='opacity:0.3;'>", unsafe_allow_html=True)
-                        st.markdown(f"### {date_str}")   # 👈 ngày-tháng-năm
+                        if date_str:
+                            st.markdown(f"### {date_str}")
                         last_date = date_str
 
-                    # Dùng chat_message => icon đỏ/vàng giống UI chính
                     with st.chat_message(role):
                         st.markdown(content)
+
 
 
                     
@@ -2729,7 +2772,6 @@ if bg_base64:
     }}
     </style>
     """, unsafe_allow_html=True)
-
 
 
 
