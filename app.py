@@ -223,6 +223,12 @@ def render_osm_map(center_lat, center_lng, items, height_px: int = 420, zoom_sta
 
             # route preview cũ (nếu có) cũng nên bỏ
             st.session_state.route_preview = None
+            
+            # ➕ LOG context mới sau khi pick origin trên map
+            try:
+                _log_ctx_snapshot("Origin selected on map")
+            except NameError:
+                pass  # phòng trường hợp hàm chưa được định nghĩa
 
             # feedback nhỏ
             try:
@@ -380,6 +386,37 @@ def save_chat_message(user_email: str, role: str, content: str):
         "content": content,
         "timestamp": firestore.SERVER_TIMESTAMP
     })
+    
+    
+# GPS
+def _log_ctx_snapshot(reason: str = "Context updated"):
+    """
+    Ghi một dòng lịch sử vào chat (và Firebase) mô tả
+    origin / radius / transport / place type hiện tại.
+    """
+    ori  = st.session_state.get("origin_text") or st.session_state.get("chat_origin_text") or "N/A"
+    r    = int(st.session_state.get("radius_km", 3) or 3)
+    mode = st.session_state.get("mode_label", "motorcycling")
+    opt  = st.session_state.get("opt_label", "Cafe")
+
+    msg = (
+        f"**· NestFeast:** {reason}\n"
+        f"- Origin: `{ori}`\n"
+        f"- Radius: **{r} km**\n"
+        f"- Transport: `{mode}`\n"
+        f"- Place type: `{opt}`"
+    )
+
+    # assistant message trên UI
+    st.session_state.chat_msgs.append({"role": "assistant", "content": msg})
+
+    # nếu có user đăng nhập thì lưu luôn vào Firebase
+    try:
+        if st.session_state.get("user"):
+            save_chat_message(st.session_state.user, "assistant", msg)
+    except Exception:
+        pass
+    
 
 # ======= Session state =======
 if "user" not in st.session_state:
@@ -1384,6 +1421,9 @@ with c_map:
             mode=MODE_MAP[st.session_state.mode_label],
             seed_cap=30, limit=20, lang="en", country="vn",
         )
+        
+        # ➕ Ghi lại context hiện tại (origin + radius + transport + type)
+        _log_ctx_snapshot("Re-run recommender with current settings")
 
         try:
             with st.spinner("Finding the best places..."):
@@ -1788,41 +1828,12 @@ def _context_ready() -> bool:
 def _onboarding_message() -> str:
     return (
         "To recommend accurately, I need your **origin**, **radius**, **transportation**, and **place type**.\n\n"
-        "• *Origin*: enter an address (e.g., `University of Science, HCMC`)\n"
+        "• *Origin*: enter an address (e.g., `Hồ con rùa, HCM`)\n"
         "• *Radius*: search radius (km)\n"
         "• *Transportation*: walk / motorcycle / car\n"
         "• *Tag*: Restaurant / Cafe / Hotel\n\n"
         "Click **Save & start** to begin."
     )
-
-def _log_ctx_snapshot(reason: str = "Context updated"):
-    """
-    Ghi một dòng lịch sử vào chat (và Firebase) mô tả
-    origin / radius / transport / place type hiện tại.
-    """
-    ori  = st.session_state.get("origin_text") or st.session_state.get("chat_origin_text") or "N/A"
-    r    = int(st.session_state.get("radius_km", 3) or 3)
-    mode = st.session_state.get("mode_label", "motorcycling")
-    opt  = st.session_state.get("opt_label", "Cafe")
-
-    msg = (
-        f"**· NestFeast:** {reason}\n"
-        f"- Origin: `{ori}`\n"
-        f"- Radius: **{r} km**\n"
-        f"- Transport: `{mode}`\n"
-        f"- Place type: `{opt}`"
-    )
-
-    # assistant message trên UI
-    st.session_state.chat_msgs.append({"role": "assistant", "content": msg})
-
-    # nếu có user đăng nhập thì lưu luôn vào Firebase
-    try:
-        if st.session_state.get("user"):
-            save_chat_message(st.session_state.user, "assistant", msg)
-    except Exception:
-        pass
-
 
 
 # ==== Render kết quả + Map/Route ====
@@ -2338,36 +2349,47 @@ if st.session_state.chat_open:
             if st.session_state.nf_show_mode_menu:
                 mode_now = st.session_state.get("mode_label", "motorcycling")
                 m = st.selectbox(
-                    "Choose transport", list(MODE_MAP.keys()),
+                    "Choose transport",
+                    list(MODE_MAP.keys()),
                     index=list(MODE_MAP.keys()).index(mode_now),
                     key="nf_mode_select2",
                 )
+
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.session_state.mode_label = m
-                    en = {"walking": "walk", "motorcycling": "motorcycle", "driving": "drive", "truck": "truck"}
-                    text = f"I {en.get(m,m)}"
+                    # CHỈ gửi khi bấm Apply
+                    if st.button("Apply", key="nf_apply_mode"):
+                        st.session_state.mode_label = m
+                        en = {
+                            "walking": "walk",
+                            "motorcycling": "motorcycle",
+                            "driving": "drive",
+                            "truck": "truck",
+                        }
+                        text = f"I {en.get(m, m)}"
 
-                    # user message
-                    st.session_state.chat_msgs.append({"role": "user", "content": text})
-                    if st.session_state.user:
-                        save_chat_message(st.session_state.user, "user", text)
+                        # user message
+                        st.session_state.chat_msgs.append({"role": "user", "content": text})
+                        if st.session_state.user:
+                            save_chat_message(st.session_state.user, "user", text)
 
-                    # bot reply
-                    resp = _send_or_prime(text)
-                    _apply_ctx(resp)
-                    reply_text = resp.get("reply", "")
-                    st.session_state.chat_msgs.append({"role": "assistant", "content": reply_text})
-                    if st.session_state.user:
-                        save_chat_message(st.session_state.user, "assistant", reply_text)
+                        # bot reply
+                        resp = _send_or_prime(text)
+                        _apply_ctx(resp)
+                        reply_text = resp.get("reply", "")
+                        st.session_state.chat_msgs.append({"role": "assistant", "content": reply_text})
+                        if st.session_state.user:
+                            save_chat_message(st.session_state.user, "assistant", reply_text)
 
-                    st.session_state.chat_last_chips = resp.get("chips") or []
-                    st.session_state.nf_show_mode_menu = False
-                    st.rerun()
+                        st.session_state.chat_last_chips = resp.get("chips") or []
+                        st.session_state.nf_show_mode_menu = False
+                        st.rerun()
+
                 with c2:
                     if st.button("Close", key="nf_close_mode"):
                         st.session_state.nf_show_mode_menu = False
                         st.rerun()
+
 
             # ----- Menu con: ORIGIN -----
             if st.session_state.nf_show_origin_menu:
@@ -2772,6 +2794,5 @@ if bg_base64:
     }}
     </style>
     """, unsafe_allow_html=True)
-
 
 
