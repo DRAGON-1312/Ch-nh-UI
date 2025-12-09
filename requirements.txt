@@ -1,0 +1,36 @@
+# Core UI
+streamlit
+
+# HTTP clients
+requests
+httpx
+
+# Firebase Admin SDK (auth + Firestore client)
+firebase-admin
+google-cloud-firestore
+
+# Map & widgets
+folium
+streamlit-folium
+streamlit-js-eval
+
+# --- Web framework ---
+fastapi>=0.110
+
+# --- ASGI server (chạy app) ---
+uvicorn[standard]>=0.23
+
+# --- Data models (Pydantic v2 API: BaseModel, Field, field_validator, ...) ---
+pydantic>=2.5
+
+# --- HTTP client (providers, services gọi API ngoài) ---
+httpx>=0.27
+
+# --- Đọc biến môi trường từ .env (providers.llm.gemini, http_client) ---
+python-dotenv>=1.0
+
+# (Tùy chọn nhưng khuyến nghị nếu file settings.py dùng)
+pydantic-settings>=2.2
+
+# Tunnel local port to the internet
+pinggy
