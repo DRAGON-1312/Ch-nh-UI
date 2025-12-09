@@ -16,4 +16,4 @@ python pinggy_run.py
 ```
 
 ## 4. Get the Pinggy link
-``From the output of pinggy_run.py, copy the link``
+From the output of pinggy_run.py, copy the link
