@@ -1,5 +1,6 @@
 # Ch-nh-UI
 
+## I. Running code
 # 1. Create venv
 ```
 python -m venv .venv
@@ -23,18 +24,25 @@ pip install -r requirements.txt
 
 # 4. Run BE
 ```
+# 1 terminal for BE
+cd backend
 uvicorn frontend.app.main:app --reload --port 8501 --log-level info
 ```
 
 # 5. Run FE
 ```
+# 1 terminal for FE
+cd FE
 streamlit run frontend/app.py
 ```
 
 # 6. Run Pinggy
 ```
+# 1 terminal for Pinggy
 python pinggy_run.py
 ```
+
+
 
 # 7. Get the Pinggy link
 From the output of pinggy_run.py, copy the link
