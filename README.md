@@ -22,27 +22,22 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-# 4. Run BE
+# 4. Run BE (Create new terminal for BE)
 ```
-# 1 terminal for BE
 cd backend
 uvicorn app.main:app --reload --port 8000 --log-level info
 ```
 
-# 5. Run FE
+# 5. Run FE (Create new terminal for FE)
 ```
-# 1 terminal for FE
 cd frontend
 python -m streamlit run app.py  
 ```
 
-# 6. Run Pinggy
+# 6. Run Pinggy (Create new terminal for Pinggy)
 ```
-# 1 terminal for Pinggy
 python pinggy_run.py
 ```
-
-
 
 # 7. Get the Pinggy link
 From the output of pinggy_run.py, copy the link
