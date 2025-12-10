@@ -26,14 +26,14 @@ pip install -r requirements.txt
 ```
 # 1 terminal for BE
 cd backend
-uvicorn frontend.app.main:app --reload --port 8501 --log-level info
+uvicorn app.main:app --reload --port 8000 --log-level info
 ```
 
 # 5. Run FE
 ```
 # 1 terminal for FE
-cd FE
-streamlit run frontend/app.py
+cd frontend
+python -m streamlit run app.py  
 ```
 
 # 6. Run Pinggy
