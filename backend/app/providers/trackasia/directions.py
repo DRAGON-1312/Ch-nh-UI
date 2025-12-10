@@ -70,6 +70,49 @@ def _find_polyline(obj) -> Optional[str]:
     return None
 
 
+def _decode_polyline(poly: str) -> List[Tuple[float, float]]:
+    """Giải mã Google-style encoded polyline → [(lat, lng), ...]."""
+    if not isinstance(poly, str) or not poly:
+        return []
+
+    coords: List[Tuple[float, float]] = []
+    index = 0
+    lat = 0
+    lng = 0
+    length = len(poly)
+
+    while index < length:
+        # decode latitude
+        shift = 0
+        result = 0
+        while True:
+            b = ord(poly[index]) - 63
+            index += 1
+            result |= (b & 0x1F) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlat = ~(result >> 1) if (result & 1) else (result >> 1)
+        lat += dlat
+
+        # decode longitude
+        shift = 0
+        result = 0
+        while True:
+            b = ord(poly[index]) - 63
+            index += 1
+            result |= (b & 0x1F) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlng = ~(result >> 1) if (result & 1) else (result >> 1)
+        lng += dlng
+
+        coords.append((lat / 1e5, lng / 1e5))
+
+    return coords
+
+
 def _parse_v2_geometry(data: Dict[str, Any], mode: str) -> List[RoutePath]:
     out: List[RoutePath] = []
     if not isinstance(data, dict) or data.get("error"):
@@ -93,9 +136,13 @@ def _parse_v2_geometry(data: Dict[str, Any], mode: str) -> List[RoutePath]:
     if isinstance(results, list) and results:
         for it in results:
             poly = _find_polyline(it)
-            coords = _find_coords(it) if not poly else None
+            if poly:
+                coords = _decode_polyline(poly)
+            else:
+                coords = _find_coords(it)
             out.append(RoutePath(mode=mode, polyline=poly, coords=coords, raw=it))
-        if out: return out
+        if out:
+            return out
 
     # 3) paths / routes (một số backend)
     for key in ("paths", "routes"):
@@ -103,13 +150,20 @@ def _parse_v2_geometry(data: Dict[str, Any], mode: str) -> List[RoutePath]:
         if isinstance(arr, list) and arr:
             for it in arr:
                 poly = _find_polyline(it)
-                coords = _find_coords(it) if not poly else None
+                if poly:
+                    coords = _decode_polyline(poly)
+                else:
+                    coords = _find_coords(it)
                 out.append(RoutePath(mode=mode, polyline=poly, coords=coords, raw=it))
-            if out: return out
+            if out:
+                return out
 
     # 4) Last resort: quét toàn payload
     poly = _find_polyline(d)
-    coords = _find_coords(d)
+    if poly:
+        coords = _decode_polyline(poly)
+    else:
+        coords = _find_coords(d)
     if poly or coords:
         out.append(RoutePath(mode=mode, polyline=poly, coords=coords, raw=d))
     return out
