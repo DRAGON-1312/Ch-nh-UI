@@ -14,9 +14,9 @@ from backend_client import (
 )
 from datetime import datetime, timezone
 import time  # <-- thêm để debounce
+from zoneinfo import ZoneInfo
 import re
 from streamlit_js_eval import get_geolocation
-
 
 st.set_page_config(page_title="NestFeast", layout="wide")
 st.markdown("""
@@ -27,6 +27,7 @@ st.markdown("""
 .leaflet-control-container .leaflet-control {
     display: none !important;
 }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -331,50 +332,38 @@ def load_history(user_email):
           .document(user_email)
           .collection("history")
           .order_by("timestamp")
-          .limit(200)
+          .limit(1000)   # tăng nếu muốn
     )
 
     docs = list(history_ref.stream())
     if not docs:
         return []
 
-    msgs_raw = []
+    msgs = []
+    vn_tz = ZoneInfo("Asia/Ho_Chi_Minh")
+
     for doc in docs:
         data = doc.to_dict()
         ts = data.get("timestamp")
 
-        # convert Firestore timestamp → datetime
+        # Firestore Timestamp / datetime → VN time
         if hasattr(ts, "to_datetime"):
-            dt = ts.to_datetime().astimezone()
+            dt = ts.to_datetime().astimezone(vn_tz)
         elif isinstance(ts, datetime):
-            dt = ts.astimezone()
+            dt = ts.astimezone(vn_tz)
         else:
-            continue   # skip item lỗi timestamp
+            continue
 
-        msgs_raw.append({
+        msgs.append({
             "role": data.get("role", "assistant"),
             "content": data.get("content", ""),
-            "dt": dt,
+            "date": dt.strftime("%d-%m-%Y"),   # ngày VN
+            "time": dt.strftime("%H:%M"),      # giờ VN
         })
 
-    # Lấy danh sách ngày duy nhất
-    all_dates = sorted({m["dt"].date() for m in msgs_raw})
-
-    #  Lấy 5 ngày gần nhất bằng index [-5:]
-    recent_dates = set(all_dates[-5:])
-
-    #  Lọc message thuộc 5 ngày này
-    msgs = [
-        {
-            "role": m["role"],
-            "content": m["content"],
-            "date": m["dt"].strftime("%d-%m-%Y")
-        }
-        for m in msgs_raw
-        if m["dt"].date() in recent_dates
-    ]
-
     return msgs
+
+
 
 
 def save_chat_message(user_email: str, role: str, content: str):
@@ -535,18 +524,24 @@ def get_base64_image(path: str | Path) -> str:
 ASSETS_DIR = Path(__file__).resolve().parent / ".image"
 IMG_PATH = ASSETS_DIR / "logo.jpg"
 BG_PATH = ASSETS_DIR / "background.jpg"
+CHATBOT_IMG_PATH = ASSETS_DIR / "chatbot.jpg"
 
 img_base64 = ""
 bg_base64 = ""
+chatbot_img_base64 = ""
 if IMG_PATH.exists():
     img_base64 = get_base64_image(IMG_PATH)
 
 if BG_PATH.exists():
     bg_base64 = get_base64_image(BG_PATH)
 
+if CHATBOT_IMG_PATH.exists():
+    chatbot_img_base64 = get_base64_image(CHATBOT_IMG_PATH)
+
 
 logo_tag = f'<img src="data:image/jpeg;base64,{img_base64}" width="100">' if img_base64 else ""
-img_html = f'<img src="data:image/jpeg;base64,{img_base64}" width="80" style="border-radius:8px;">' if img_base64 else ""
+img_html = f'<img src="data:image/jpeg;base64,{img_base64}" width="90" style="border-radius:8px;">' if img_base64 else ""
+
 
 
 
@@ -1950,24 +1945,26 @@ if res and not st.session_state.pending_cands:
 fab_box = st.container()
 drawer_box = st.container()
 
+
 # 2) Nút bong bóng
 with fab_box:
     # hook để CSS nhận diện đúng block
     st.markdown('<span class="nf-fab-hook"></span>', unsafe_allow_html=True)
-    if st.button("💬", key="nf_fab_btn", help="NestFeast Chat"):
+    if st.button(" ", key="nf_fab_btn", help="NestFeast Chat"):
         st.session_state.chat_open = not st.session_state.chat_open
 
 
 
 # 3) Drawer nổi (panel chat)
 if st.session_state.chat_open:
+    st.markdown('<span class="nf-drawer-hook"></span>', unsafe_allow_html=True)
+    drawer_box = st.container(height=800)
+    
     with drawer_box:
-        st.markdown('<span class="nf-drawer-hook"></span>', unsafe_allow_html=True)
-
         c1, c2, c3 = st.columns([5, 1, 1])
         with c1:
             st.subheader("NestFeast Chat")
-             # NEW: load chat history từ Firebase (nếu đã login)
+            # NEW: load chat history từ Firebase (nếu đã login)
             if st.session_state.user:
                 try:
                     st.session_state.history = load_history(st.session_state.user)
@@ -2031,31 +2028,31 @@ if st.session_state.chat_open:
         #            "tags":             ctx.get("tags"),
         #            "__last_ctx_debug": st.session_state.get("__last_ctx_debug"),
         #        })
-         # Hiển thị lịch sử gần nhất (tối đa 10 message) nếu có
+        # Hiển thị lịch sử gần nhất (tối đa 10 message) nếu có
         # Hiển thị lịch sử 5 ngày gần nhất (do load_history đã lọc sẵn)
         if st.session_state.user and st.session_state.history:
-            with st.expander("🕒 Chat history (last 5 days)", expanded=False):
-                last_date = None
+            with st.expander("🕒 Chat history", expanded=False):
+                chat_history_box = st.container(height=300)
+                with chat_history_box:
+                    last_date = None
 
-                for msg in st.session_state.history:
-                    date_str = msg.get("date", "")
-                    role = msg.get("role", "assistant")
-                    content = msg.get("content", "")
+                    for msg in st.session_state.history:
+                        date_str = msg.get("date", "")
+                        time_str = msg.get("time", "")
+                        role = msg.get("role", "assistant")
+                        content = msg.get("content", "")
 
-                    # Đổi ngày → in header + ngăn cách
-                    if date_str != last_date:
-                        if last_date is not None:
-                            st.markdown("<hr style='opacity:0.3;'>", unsafe_allow_html=True)
-                        if date_str:
+                        # đổi ngày → in header
+                        if date_str != last_date:
+                            if last_date is not None:
+                                st.markdown("<hr style='opacity:0.3;'>", unsafe_allow_html=True)
                             st.markdown(f"### {date_str}")
-                        last_date = date_str
+                            last_date = date_str
 
-                    with st.chat_message(role):
-                        st.markdown(content)
+                        with st.chat_message(role):
+                            st.markdown(f"**{time_str}**\n\n{content}")
 
 
-
-                    
         # 3a) Onboarding khi thiếu context tối thiểu
         if not _context_ready():
             with st.chat_message("assistant"):
@@ -2273,6 +2270,7 @@ if st.session_state.chat_open:
 
         # 3b) Đã đủ context → chat normal
         else:
+        
             # Lịch sử chat
             for m in st.session_state.chat_msgs[-40:]:
                 with st.chat_message(m["role"]):
@@ -2606,7 +2604,7 @@ if st.session_state.chat_open:
 
             # Ô nhập tin nhắn
             with st.form("nf_chat_form", clear_on_submit=True):
-                c_inp, c_btn = st.columns([4, 1])
+                c_inp, c_btn = st.columns([18, 1])
                 with c_inp:
                     nf_text = st.text_input(
                         "Type a message…",
@@ -2616,6 +2614,7 @@ if st.session_state.chat_open:
                     )
                 with c_btn:
                     nf_send = st.form_submit_button("➤")
+
 
             if 'nf_send_guard' not in st.session_state:
                 st.session_state.nf_send_guard = 0
@@ -2642,137 +2641,40 @@ if st.session_state.chat_open:
                 st.rerun()
 
 # 4) CSS – cố định vị trí 2 container bằng :has()
-st.markdown("""
+st.markdown(f"""
 <style>
-/* FAB (nút tròn) – đặt cố định góc phải dưới */
-section.main .block-container div:has(> .element-container .nf-fab-hook) button {
-  position: fixed; right: 24px; bottom: 24px; z-index: 9999;
-  width: 60px; height: 60px; border-radius: 50%;
-  background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
-  color:#fff; font-size:24px; font-weight:700;
-  box-shadow: 0 8px 24px rgba(47, 79, 58, 0.4);
-  border: none;
-  transition: all 0.3s ease;
-  cursor: pointer;
-}
+/* === FAB: FIX wrapper để nó thật sự “dính” góc phải dưới === */
+div.element-container:has(span.nf-fab-hook) + div.element-container {{
+  position: fixed !important;
+  right: 24px !important;
+  bottom: 24px !important;
+  z-index: 999999 !important;
+}}
 
-section.main .block-container div:has(> .element-container .nf-fab-hook) button:hover {
-  transform: scale(1.1) translateY(-2px);
-  box-shadow: 0 12px 32px rgba(47, 79, 58, 0.6);
-  background: linear-gradient(135deg, #3A5F45 0%, #436757 100%);
-}
+/* === Button === */
+div.element-container:has(span.nf-fab-hook) + div.element-container button {{
+  width: 78px !important;          /* <-- tăng nút */
+  height: 78px !important;
+  border-radius: 20px !important;  /* hoặc 50% nếu muốn tròn */
+  padding: 0 !important;
+  border: none !important;
 
-/* Drawer nổi – cố định phía trên FAB */
-section.main .block-container div:has(> .element-container .nf-drawer-hook) {
-  position: fixed; right: 24px; bottom: 100px; z-index: 9998;
-  width: 400px; max-height: 75vh; overflow: auto;
-  background: #fff; 
-  border: 1px solid #e0e6e3; 
-  border-radius: 16px;
-  box-shadow: 0 12px 40px rgba(0,0,0,.2);
-  padding: 16px 18px;
-  animation: slideUp 0.3s ease-out;
-}
+  background-color: #fff !important;
+  background-image: url("data:image/jpeg;base64,{chatbot_img_base64}") !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
 
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+  background-size: 62px 62px !important;  /* <-- tăng icon */
+  /* hoặc dùng: background-size: 85% 85% !important; */
+  /* hoặc dùng: background-size: cover !important; */
 
-/* Scrollbar cho drawer */
-section.main .block-container div:has(> .element-container .nf-drawer-hook)::-webkit-scrollbar {
-  width: 8px;
-}
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25) !important;
+}}
 
-section.main .block-container div:has(> .element-container .nf-drawer-hook)::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 10px;
-}
-
-section.main .block-container div:has(> .element-container .nf-drawer-hook)::-webkit-scrollbar-thumb {
-  background: #2F4F3A;
-  border-radius: 10px;
-}
-
-section.main .block-container div:has(> .element-container .nf-drawer-hook)::-webkit-scrollbar-thumb:hover {
-  background: #3A5F45;
-}
-
-/* trang trí nhỏ */
-.nf-chip-row { 
-  display:flex; 
-  flex-wrap:wrap; 
-  gap:10px; 
-  margin:12px 4px; 
-}
-
-.nf-chip-row button {
-  background: linear-gradient(135deg, #f5f7f6 0%, #ffffff 100%);
-  border: 2px solid #e0e6e3;
-  border-radius: 20px;
-  padding: 8px 16px;
-  font-size: 14px;
-  font-weight: 500;
-  color: #2F4F3A;
-  transition: all 0.3s ease;
-}
-
-.nf-chip-row button:hover {
-  background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
-  color: white;
-  border-color: #2F4F3A;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(47, 79, 58, 0.3);
-}
-
-section.main .block-container div:has(> .element-container .nf-drawer-hook) .stTextInput > div > div > input {
-  border-radius: 12px; 
-  padding: 12px 16px; 
-  border: 2px solid #e0e6e3;
-  transition: all 0.3s ease;
-}
-
-section.main .block-container div:has(> .element-container .nf-drawer-hook) .stTextInput > div > div > input:focus {
-  border-color: #2F4F3A;
-  box-shadow: 0 0 0 3px rgba(47, 79, 58, 0.15);
-}
-
-section.main .block-container div:has(> .element-container .nf-drawer-hook) .stForm .stButton > button {
-  height: 44px; 
-  width: 100%; 
-  border-radius: 12px; 
-  background: linear-gradient(135deg, #2F4F3A 0%, #3A5F45 100%);
-  color: #fff;
-  font-weight: 600;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(47, 79, 58, 0.3);
-}
-
-section.main .block-container div:has(> .element-container .nf-drawer-hook) .stForm .stButton > button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(47, 79, 58, 0.5);
-  background: linear-gradient(135deg, #3A5F45 0%, #436757 100%);
-}
-
-/* Chat message styling */
-section.main .block-container div:has(> .element-container .nf-drawer-hook) [data-testid="stChatMessage"] {
-  padding: 12px;
-  border-radius: 12px;
-  margin: 8px 0;
-}
-
-section.main .block-container div:has(> .element-container .nf-drawer-hook) [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
-  background: #f5f7f6;
-  padding: 12px 16px;
-  border-radius: 10px;
-  border-left: 4px solid #2F4F3A;
-}
+/* Ẩn chữ trong button */
+div.element-container:has(span.nf-fab-hook) + div.element-container button span {{
+  display: none !important;
+}}
 </style>
 """, unsafe_allow_html=True)
 
