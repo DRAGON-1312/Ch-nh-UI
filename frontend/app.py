@@ -27,6 +27,13 @@ st.markdown("""
 .leaflet-control-container .leaflet-control {
     display: none !important;
 }
+/* Kéo nội dung lên sát trên (đúng selector Streamlit mới) */
+[data-testid="stAppViewContainer"] .main .block-container{
+  padding-top: 0.5rem !important;
+}
+[data-testid="stMainBlockContainer"]{
+  padding-top: 0.5rem !important;
+}
 
 </style>
 """, unsafe_allow_html=True)
@@ -2675,6 +2682,14 @@ div.element-container:has(span.nf-fab-hook) + div.element-container button {{
 div.element-container:has(span.nf-fab-hook) + div.element-container button span {{
   display: none !important;
 }}
+
+* KÉO LÊN SÁT TRÊN — dán vào đây */
+section.main > div.block-container{{
+padding-top: 0.1rem !important;
+}}
+
+/* ẨN header để khỏi chừa khoảng trống — dán vào đây */
+header{{ display:none !important; }}
 </style>
 """, unsafe_allow_html=True)
 
