@@ -1106,7 +1106,7 @@ with col1:
 
         if key_q in cache:
             st.session_state.origin_suggestions = cache[key_q]
-        elif q != st.session_state.last_auto_q and (now - st.session_state.last_auto_ts) > 0.5:
+        elif q != st.session_state.last_auto_q:
             try:
                 with st.spinner("Suggesting..."):
                     suggestions = origin_suggest_sync(q)
@@ -1114,7 +1114,8 @@ with col1:
                 cache[key_q] = suggestions
                 st.session_state.last_auto_q = q
                 st.session_state.last_auto_ts = now
-            except Exception:
+            except Exception as e:
+                st.error(f"origin_suggest_sync failed: {e}")
                 st.session_state.origin_suggestions = []
 
     
