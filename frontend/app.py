@@ -2000,6 +2000,7 @@ if st.session_state.chat_open:
                         st.warning(f"⚠️ Could not clear cloud history: {e}")
 
                     _nf_reset_chat_ctx()
+                    st.rerun()
 
         
         # ✅ Chỉ còn 1 nút Reset, dùng luôn key nf_reset_ctx
