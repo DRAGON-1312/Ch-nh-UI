@@ -316,7 +316,7 @@ def _nf_reset_chat_ctx():
     st.session_state.pending_cands = None
     st.session_state.route_preview = None
     
-    
+
 # === Firebase setup ===
 FIREBASE_API_KEY = st.secrets["firebase_login"]["apiKey"]
 
@@ -1983,11 +1983,7 @@ if st.session_state.chat_open:
             if st.session_state.user:
                 if st.button(" X Clear history", key="nf_clear_history"):
 
-                    # 1) Xoá lịch sử ở UI
-                    st.session_state.chat_msgs = []
-                    st.session_state.chat_last_chips = []
-                    st.session_state.history = []
-
+                   
                     # 2) Xoá toàn bộ lịch sử trên Firestore
                     try:
                         user_email = st.session_state.user
@@ -2003,8 +1999,7 @@ if st.session_state.chat_open:
                     except Exception as e:
                         st.warning(f"⚠️ Could not clear cloud history: {e}")
 
-                    # 3) Refresh UI sau khi xoá
-                    st.rerun()
+                    _nf_reset_chat_ctx()
 
         
         # ✅ Chỉ còn 1 nút Reset, dùng luôn key nf_reset_ctx
@@ -2014,30 +2009,6 @@ if st.session_state.chat_open:
                 st.rerun()
 
 
-        # (1) Nút bật/tắt debug
-        # st.session_state.nf_debug_ctx = st.toggle(
-        #    "🔎 Debug context",
-        #    value=st.session_state.get("nf_debug_ctx", False),
-        #)
-
-        # (2) Expander soi context đang gửi sang BE
-        #if st.session_state.nf_debug_ctx:
-        #    with st.expander("🛠 Context debug", expanded=False):
-        #        ctx = _current_chat_context()
-        #        st.write({
-        #            "ctx_confirmed":    st.session_state.get("ctx_confirmed"),
-        #            "origin_selected":  st.session_state.get("origin_selected"),
-        #            "origin_text_input":st.session_state.get("origin_text_input"),
-        #            "chat_origin_text": st.session_state.get("chat_origin_text"),
-        #            "origin_text(ctx)": ctx.get("origin_text"),
-        #            "origin(ctx)":      ctx.get("origin"),
-        #            "radius_km":        ctx.get("radius_km"),
-        #            "mode":             ctx.get("mode"),
-        #            "tags":             ctx.get("tags"),
-        #            "__last_ctx_debug": st.session_state.get("__last_ctx_debug"),
-        #        })
-        # Hiển thị lịch sử gần nhất (tối đa 10 message) nếu có
-        # Hiển thị lịch sử 5 ngày gần nhất (do load_history đã lọc sẵn)
         if st.session_state.user and st.session_state.history:
             with st.expander("🕒 Chat history", expanded=False):
                 chat_history_box = st.container(height=300)
