@@ -1,47 +1,47 @@
 # NestFeast
-## I. Running code
-# 1. Create venv
+## 1. Running code
+### 1.1. Create venv
 ```
 python -m venv .venv
 ```
 
-# 2. Activate venv
-## 2.1. For powershell
+### 1.2 Activate venv
+#### 1.2.1. For powershell
 ```
 .venv/Scripts/Activate.ps1
 ```
 
-## 2.2. For Mac/Linux
+#### 1.2.2. For Mac/Linux
 ```
 source .venv/bin/activate
 ```
 
-# 3. Download dependencies
+### 1.3. Download dependencies
 ```
 pip install -r requirements.txt
 ```
 
-# 4. Run BE (Create new terminal for BE)
+### 1.4. Run BE (Create new terminal for BE)
 ```
 cd backend
 uvicorn app.main:app --reload --port 8000 --log-level info
 ```
 
-# 5. Run FE (Create new terminal for FE)
+### 1.5. Run FE (Create new terminal for FE)
 ```
 cd frontend
 python -m streamlit run app.py  
 ```
 
-# 6. Run Pinggy (Create new terminal for Pinggy)
+### 1.6. Run Pinggy (Create new terminal for Pinggy)
 ```
 python pinggy_run.py
 ```
 
-# 7. Get the Pinggy link
+### 1.7. Get the Pinggy link
 From the output of pinggy_run.py, copy the link
 
-## II. Directory structure
+## 2. Directory structure
 ```text
 nestfeast/
 ├─ backend/
@@ -60,145 +60,145 @@ nestfeast/
 |  ├─ backend_client.py
 |─ pinggy_run.py
 |_ requirements.txt
-
-### 1. Backend (FastAPI)
+```
+### 2.1. Backend (FastAPI)
 
 #### `backend/`
-Thư mục chứa toàn bộ mã nguồn backend (API + business logic).
+Directory containing the entire backend codebase (API + business logic).
 
 ---
 
 #### `backend/app/main.py`
-Entrypoint của FastAPI:
+FastAPI entry point:
 
-- Khởi tạo `FastAPI()`.
-- Gắn các router từ `app.api`.
-- Cấu hình docs, health check, v.v.
-
----
-
-#### `backend/app/api/` – HTTP layer (router)
-Chỉ chứa các **endpoint** (không chứa logic phức tạp):
-
-- `intake.py` – API nhận origin (text / toạ độ) → gọi service `intake_origin`.
-- `nearbySearch.py` – API tìm POI gần origin theo radius, tag.
-- `ranked.py` – API recommend địa điểm đã được rank (kết hợp nearby + matrix + ranking).
-- `routing.py` – API preview route (origin → destination, nhiều mode di chuyển).
-- `autocomplete.py` – API gợi ý địa điểm khi user gõ text.
-- `chatbot.py` – API cho NestFeast Chat (nhận message → gọi service chatbot).
+- Initialize `FastAPI()`.
+- Mount routers from `app.api`.
+- Configure docs, health checks, etc.
 
 ---
 
-#### `backend/app/providers/` – Adapter gọi API bên ngoài
-Tách riêng từng provider để dễ thay đổi / mock.
+#### `backend/app/api/` – HTTP layer (routers)
+Contains endpoints only (no complex business logic):
+
+- `intake.py` – API receiving origin (text/coordinates) → calls the `intake_origin` service.
+- `nearbySearch.py` – API to find POIs near the origin by radius and tag.
+- `ranked.py` – API recommending ranked places (combining nearby + matrix + ranking).
+- `routing.py` – API for route preview (origin → destination, multiple travel modes).
+- `autocomplete.py` – API providing place suggestions as the user types.
+- `chatbot.py` – API for NestFeast Chat (receives a message → calls the chatbot service).
+
+---
+
+#### `backend/app/providers/` – Adapters for external APIs
+Providers are isolated for easy substitution and mocking.
 
 - `providers/llm/gemini.py`  
-  Wrapper gọi **Google Gemini** (Flash 2.5) để:
-  - Tạo prompt.
-  - Gọi model ở JSON-mode.
-  - Chuẩn hoá dạng `ChatMessage`, `LLMReply`.
+  Wrapper for **Google Gemini** (Flash 2.5) to:
+  - Build prompts.
+  - Invoke the model in JSON mode.
+  - Normalize to `ChatMessage`, `LLMReply`.
 
-- `providers/serpapi/` – dùng **SerpAPI** cho enrich thông tin địa điểm:
-  - `client.py` – HTTP client chung cho SerpAPI (key, base URL, retry).
-  - `enrich.py` – gọi SerpAPI để lấy thêm info/review cho Place.
-  - `nearby.py` – (nếu dùng) hỗ trợ tìm POI bằng SerpAPI.
+- `providers/serpapi/` – uses **SerpAPI** to enrich place information:
+  - `client.py` – shared SerpAPI HTTP client (key, base URL, retry).
+  - `enrich.py` – calls SerpAPI to fetch additional info/reviews for a Place.
+  - `nearby.py` – (optional) supports POI search via SerpAPI.
 
-- `providers/trackasia/` – dùng **TrackAsia** cho map & routing:
-  - `client.py` – HTTP client chung (base URL, token, timeout, retry).
-  - `autocomplete.py` – gợi ý địa chỉ/địa điểm theo text.
-  - `geocode.py` – chuyển địa chỉ → toạ độ.
-  - `reverse.py` – chuyển toạ độ → địa chỉ.
-  - `nearby.py` / `matrix.py` – tìm địa điểm xung quanh + tính ETA/distance giữa nhiều điểm.
-  - `directions.py` – gọi Directions v2 để lấy route (polyline) cho Preview route.
-  - `place_detail.py` – lấy chi tiết 1 địa điểm từ TrackAsia.
+- `providers/trackasia/` – uses **TrackAsia** for maps and routing:
+  - `client.py` – shared HTTP client (base URL, token, timeout, retry).
+  - `autocomplete.py` – address/place suggestions from text.
+  - `geocode.py` – address → coordinates (geocoding).
+  - `reverse.py` – coordinates → address (reverse geocoding).
+  - `nearby.py` / `matrix.py` – nearby search + compute ETA/distance among multiple points.
+  - `directions.py` – call Directions v2 to obtain the route (polyline) for route preview.
+  - `place_detail.py` – fetch details for a single place from TrackAsia.
 
 ---
 
 #### `backend/app/schemas/` – Data models / validation (Pydantic)
-Định nghĩa “ngôn ngữ chung” cho các layer:
+Defines the shared contract across layers:
 
-- `common.py` – type dùng chung (GeoPoint, PriceLevel, Tag, v.v.).
-- `location.py` – schema cho origin, toạ độ, bounding box…
-- `place.py` – schema chuẩn cho Place/PlaceCandidate/PlaceEnriched.
-- `ranking.py` – schema cho điểm số, weight config, kết quả ranking.
-- `chatbot.py` – schema cho request/response chatbot (message, chips, intent, v.v.).
+- `common.py` – shared types (GeoPoint, PriceLevel, Tag, etc.).
+- `location.py` – schemas for origin, coordinates, bounding box, …
+- `place.py` – canonical schemas for Place/PlaceCandidate/PlaceEnriched.
+- `ranking.py` – schemas for scores, weight configuration, and ranking outputs.
+- `chatbot.py` – schemas for chatbot request/response (message, chips, intent, etc.).
 
 ---
 
-#### `backend/app/services/` – Business logic / core thuật toán
-Không phụ thuộc HTTP, chỉ nhận/trả Python object + Pydantic model:
+#### `backend/app/services/` – Business logic / core algorithms
+HTTP-agnostic; consumes and returns only Python objects and Pydantic models:
 
-- `intake_origin.py` – chuẩn hoá origin:
-  - parse text.
-  - gọi geocode/autocomplete.
-  - xử lý origin mơ hồ, chọn candidate tốt nhất.
-- `poi.py` – logic tìm điểm đến:
-  - gọi TrackAsia nearby.
-  - map sang schema `PlaceCandidate`.
-  - (optional) enrich thêm thông tin.
-- `ranking.py` – core thuật toán ranking:
-  - tính score dựa trên rating, distance/ETA, price, v.v.
-  - xử lý fallback khi thiếu field.
+- `intake_origin.py` – origin normalization:
+  - parse text,
+  - call geocode/autocomplete,
+  - resolve ambiguous origins and select the best candidate.
+- `poi.py` – destination search logic:
+  - call TrackAsia nearby,
+  - map to the `PlaceCandidate` schema,
+  - (optional) enrich additional information.
+- `ranking.py` – core ranking algorithm:
+  - compute scores based on rating, distance/ETA, price, etc.,
+  - handle fallbacks when fields are missing.
 - `ranked.py` – orchestration:
-  - intake origin → nearby → matrix → ranking.
-  - trả về danh sách địa điểm đã sắp xếp.
-- `routing.py` – logic preview route:
-  - gọi `providers.trackasia.directions`.
-  - build geometry + summary cho FE vẽ route.
-- `autocomplete.py` – logic gợi ý text (kết hợp TrackAsia + filter).
+  - intake origin → nearby → matrix → ranking,
+  - returns a sorted list of places.
+- `routing.py` – route preview logic:
+  - call `providers.trackasia.directions`,
+  - build geometry + summary for the frontend to render the route.
+- `autocomplete.py` – text suggestion logic (combines TrackAsia + filters).
 - `chatbot.py` – NestFeast Chat service:
-  - phân tích intent, gọi các service (ranked, routing, intake_origin,…).
-  - tạo quick actions (chips).
-  - build prompt & gọi Gemini qua `providers.llm.gemini`.
+  - analyze intent and call services (ranked, routing, `intake_origin`, …),
+  - create quick actions (chips),
+  - build prompts and call Gemini via `providers.llm.gemini`.
 
 ---
 
 #### `backend/.env`
-Chứa cấu hình & secret cho backend:
+Contains backend configuration and secrets:
 
-- API key (Gemini, TrackAsia, SerpAPI…).
-- Timeout, retry, QPS cho HTTP client.
-- Các setting khác (log level, v.v.).
-- **Không commit public.**
+- API keys (Gemini, TrackAsia, SerpAPI, …).
+- Timeout, retry, QPS for HTTP clients.
+- Other settings (log level, etc.).
+- Do not commit publicly.
 
-### 2. Frontend (Streamlit)
+### 2.2. Frontend (Streamlit)
 
 #### `frontend/`
-Thư mục chứa code frontend (UI Streamlit).
+Directory containing the frontend code (Streamlit UI).
 
 ---
 
 #### `frontend/app.py`
-File chính của app:
+Main application file:
 
-- Giao diện form: origin, radius, transport, type (Cafe/Restaurant/Hotel…).
-- Khu vực map (folium + streamlit-folium) hiển thị marker:
-  - origin (màu xanh),
-  - candidate (màu cam).
-- Nút **RECOMMENDER**, **Preview route**, quick actions.
-- Tab **NestFeast Chat**.
-- Gọi backend thông qua `backend_client.py`.
+- Form UI: origin, radius, transport, type (Cafe/Restaurant/Hotel, …).
+- Map area (folium + streamlit-folium) displays markers:
+  - origin (green),
+  - candidates (orange).
+- Buttons: RECOMMENDER, Preview route, quick actions.
+- Tab: NestFeast Chat.
+- Calls the backend via `backend_client.py`.
 
 ---
 
 #### `frontend/backend_client.py`
-HTTP client đơn giản để gọi API backend:
+Lightweight HTTP client to call backend APIs:
 
-- Các hàm: `intake_origin()`, `search_ranked()`, `route_preview()`, `chatbot_send()`, …
-- Chuẩn hoá URL backend, handle lỗi cơ bản.
+- Functions: `intake_origin()`, `search_ranked()`, `route_preview()`, `chatbot_send()`, …
+- Normalizes the backend base URL and handles basic errors.
 
 ---
 
 #### `frontend/.image/`
-Chứa assets dùng trong UI Streamlit:
+Assets used in the Streamlit UI:
 
-- `background.jpg` – hình nền app.
-- `logo.jpg` – logo NestFeast.
+- `background.jpg` – application background.
+- `logo.jpg` – NestFeast logo.
 
 ---
 
 #### `frontend/.streamlit/secrets.toml`
-File cấu hình riêng cho Streamlit (ví dụ chạy trên Streamlit Cloud / Pinggy):
+Streamlit-specific configuration (e.g., Streamlit Cloud / Pinggy):
 
-- `BASE_URL` của backend khi deploy.
-- Các secret khác dành riêng cho UI.
+- `BASE_URL` of the backend when deployed.
+- Other UI-specific secrets.
